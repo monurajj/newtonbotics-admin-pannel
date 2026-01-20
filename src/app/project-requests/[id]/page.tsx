@@ -44,9 +44,9 @@ interface ProjectRequest {
   estimatedDurationMonths: number;
   budgetEstimate: number;
   requiredResources: string[];
-  mentorId?: string;
+  mentorId?: string | { _id?: string; id?: string; email?: string; firstName?: string; lastName?: string; fullName?: string; displayName?: string };
   status: 'pending' | 'under_review' | 'approved' | 'rejected' | 'on_hold';
-  submittedBy: string;
+  submittedBy: string | { _id?: string; id?: string; email?: string; firstName?: string; lastName?: string; fullName?: string; displayName?: string };
   submittedAt: string;
   reviewedAt?: string;
   reviewedBy?: string;
@@ -723,8 +723,25 @@ export default function ProjectRequestDetailsPage() {
                   <h4 className="text-sm font-medium text-gray-700 mb-1">Submitted By</h4>
                   <div className="flex items-center text-sm text-gray-900">
                     <UserGroupIcon className="w-4 h-4 mr-2" />
-                    User ID: {projectRequest.submittedBy}
+                    {typeof projectRequest.submittedBy === 'string' 
+                      ? `User ID: ${projectRequest.submittedBy}`
+                      : (() => {
+                          const user = projectRequest.submittedBy;
+                          const name = user?.fullName || user?.displayName || 
+                            (user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : null) ||
+                            user?.email ||
+                            user?.id || 
+                            user?._id ||
+                            'Unknown User';
+                          return name;
+                        })()
+                    }
                   </div>
+                  {typeof projectRequest.submittedBy === 'object' && projectRequest.submittedBy?.email && (
+                    <div className="text-xs text-gray-500 ml-6 mt-1">
+                      {projectRequest.submittedBy.email}
+                    </div>
+                  )}
                 </div>
 
                 {/* Mentor */}
@@ -733,8 +750,25 @@ export default function ProjectRequestDetailsPage() {
                     <h4 className="text-sm font-medium text-gray-700 mb-1">Assigned Mentor</h4>
                     <div className="flex items-center text-sm text-gray-900">
                       <UserGroupIcon className="w-4 h-4 mr-2" />
-                      Mentor ID: {projectRequest.mentorId}
+                      {typeof projectRequest.mentorId === 'string' 
+                        ? `Mentor ID: ${projectRequest.mentorId}`
+                        : (() => {
+                            const mentor = projectRequest.mentorId;
+                            const name = mentor?.fullName || mentor?.displayName || 
+                              (mentor?.firstName && mentor?.lastName ? `${mentor.firstName} ${mentor.lastName}` : null) ||
+                              mentor?.email ||
+                              mentor?.id || 
+                              mentor?._id ||
+                              'Unknown Mentor';
+                            return name;
+                          })()
+                      }
                     </div>
+                    {typeof projectRequest.mentorId === 'object' && projectRequest.mentorId?.email && (
+                      <div className="text-xs text-gray-500 ml-6 mt-1">
+                        {projectRequest.mentorId.email}
+                      </div>
+                    )}
                   </div>
                 )}
 
