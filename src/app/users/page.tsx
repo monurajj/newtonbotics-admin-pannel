@@ -156,14 +156,28 @@ export default function Users() {
         }
 
         const data = await response.json();
-        const batchUsers = data.data?.users || data.data?.items || data.users || [];
+        const rawUsers = data.data?.users || data.data?.items || data.users || [];
         
-        if (batchUsers.length === 0) {
+        // Normalize user IDs to handle both id and _id fields
+        const normalizedUsers = rawUsers.map((user: Record<string, unknown>) => {
+          const resolvedId = typeof user.id === 'string' && user.id
+            ? user.id
+            : typeof (user as { _id?: string })._id === 'string' && (user as { _id?: string })._id
+              ? (user as { _id?: string })._id
+              : '';
+          return {
+            ...user,
+            id: resolvedId || undefined,
+            _id: (user as { _id?: string })._id || resolvedId || undefined,
+          } as User;
+        }).filter((user: User) => user.id); // Filter out users without valid IDs
+        
+        if (normalizedUsers.length === 0) {
           hasMore = false;
         } else {
-          allFetchedUsers = [...allFetchedUsers, ...batchUsers];
+          allFetchedUsers = [...allFetchedUsers, ...normalizedUsers];
           const pagination = data.data?.pagination;
-          hasMore = pagination?.hasMore || batchUsers.length === limit;
+          hasMore = pagination?.hasMore || normalizedUsers.length === limit;
           skip += limit;
         }
       }

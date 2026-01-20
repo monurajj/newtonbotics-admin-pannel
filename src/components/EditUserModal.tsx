@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 
 interface User {
-  id: string;
+  id?: string;
+  _id?: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -51,6 +52,15 @@ export default function EditUserModal({ user, isOpen, onClose, onSave, departmen
   useEffect(() => {
     console.log('EditUserModal useEffect triggered:', { user, isOpen });
     if (user) {
+      // Normalize user ID and log it for debugging
+      const userId = user.id || (user as { _id?: string })._id || '';
+      console.log('EditUserModal - User ID:', userId, { id: user.id, _id: (user as { _id?: string })._id });
+      
+      if (!userId) {
+        console.error('EditUserModal - User object missing ID:', user);
+        setError('User object is missing an ID. Please refresh the page and try again.');
+      }
+      
       setFormData({
         firstName: user.firstName || '',
         lastName: user.lastName || '',
@@ -67,6 +77,7 @@ export default function EditUserModal({ user, isOpen, onClose, onSave, departmen
         preferences: user.preferences || { notifications: true, newsletter: true }
       });
       setSelectedSubroles(Array.isArray(user.subroles) ? user.subroles : []);
+      setError(''); // Clear any previous errors
     }
   }, [user, isOpen]);
 
@@ -200,7 +211,21 @@ export default function EditUserModal({ user, isOpen, onClose, onSave, departmen
 
       // Update core fields only if any core field changed
       if (Object.keys(changedFields).length > 0) {
-        const response = await fetch(`/api/users/${user.id}`, {
+        // Normalize user ID - handle both id and _id fields
+        const userId = user.id || (user as { _id?: string })._id || '';
+        
+        // Validate user ID before making the request
+        if (!userId || userId.trim().length === 0) {
+          setError('Invalid user ID. Cannot update user. The user object is missing an ID field.');
+          setIsLoading(false);
+          return;
+        }
+
+        console.log('Updating user with ID:', userId);
+        console.log('User object:', { id: user.id, _id: (user as { _id?: string })._id });
+        console.log('Changed fields:', Object.keys(changedFields));
+
+        const response = await fetch(`/api/users/${userId}`, {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -212,20 +237,28 @@ export default function EditUserModal({ user, isOpen, onClose, onSave, departmen
         console.log('Core update status:', response.status);
 
         if (response.ok) {
-          const data = await response.json();
-          updatedUser = data.data.user || updatedUser;
+          const data = await response.json().catch(() => ({}));
+          updatedUser = data.data?.user || updatedUser;
         } else {
-          const errorData = await response.json();
+          const errorData = await response.json().catch(() => ({}));
           console.error('Core update error response:', errorData);
-          let errorMessage = errorData.message || `Failed to update user (${response.status})`;
-          if (errorData.details) {
-            if (errorData.details.error?.message) {
-              errorMessage = errorData.details.error.message;
-            } else if (errorData.details.message) {
-              errorMessage = errorData.details.message;
-            }
+          
+          // Use the error message from the API, or provide a fallback
+          let errorMessage = errorData.message || errorData.error?.message;
+          
+          // Provide more specific messages based on status
+          if (response.status === 404) {
+            errorMessage = errorMessage || `User not found. The user with ID "${userId}" may have been deleted or the ID is incorrect. Please refresh the users list and try again.`;
+          } else if (response.status === 401) {
+            errorMessage = errorMessage || 'Authentication failed. Please log in again.';
+          } else if (response.status === 403) {
+            errorMessage = errorMessage || 'You do not have permission to update this user.';
+          } else if (!errorMessage) {
+            errorMessage = `Failed to update user (${response.status}). Please try again.`;
           }
+          
           setError(errorMessage);
+          setIsLoading(false);
           return;
         }
       }
@@ -233,7 +266,15 @@ export default function EditUserModal({ user, isOpen, onClose, onSave, departmen
       // Update subroles if changed
       if (subrolesChanged) {
         try {
-          const srRes = await fetch(`/api/users/${user.id}/subroles`, {
+          // Use the same normalized user ID
+          const userId = user.id || (user as { _id?: string })._id || '';
+          if (!userId) {
+            setError('Invalid user ID. Cannot update subroles.');
+            setIsLoading(false);
+            return;
+          }
+          
+          const srRes = await fetch(`/api/users/${userId}/subroles`, {
             method: 'PUT',
             headers: {
               'Authorization': `Bearer ${token}`,

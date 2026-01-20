@@ -218,14 +218,48 @@ export function useNotificationCount() {
         setCount(response.data.stats.unread);
       }
     } catch (err) {
-      // Silently handle admin access errors - this is expected for non-admin users
+      // Silently handle errors - this is expected for non-admin users or when backend is unavailable
       const errorMessage = err instanceof Error ? err.message : String(err);
-      if (errorMessage.includes('Admin access required') || errorMessage.includes('403')) {
+      const statusCode = (err as any)?.statusCode || (err as any)?.status;
+      
+      // Handle permission errors (non-admin users) - 403 status
+      if (
+        statusCode === 403 ||
+        errorMessage.includes('Admin access required') || 
+        errorMessage.includes('403') ||
+        errorMessage.includes('Forbidden')
+      ) {
         // Non-admin user, set count to 0
         setCount(0);
-      } else {
-        // Other errors, log but don't throw
-        console.error('Failed to fetch notification count:', err);
+      } 
+      // Handle server errors (backend unavailable, network issues, etc.) - 500 status
+      else if (
+        statusCode === 500 ||
+        errorMessage.includes('Internal server error') ||
+        errorMessage.includes('500') ||
+        errorMessage.includes('Failed to fetch') ||
+        errorMessage.includes('NetworkError') ||
+        errorMessage.includes('Network request failed')
+      ) {
+        // Server errors - silently fail and set count to 0
+        // Don't log to console as these are expected when backend is down
+        setCount(0);
+      } 
+      // Handle authentication errors - 401 status
+      else if (
+        statusCode === 401 ||
+        errorMessage.includes('No authorization token') ||
+        errorMessage.includes('401') ||
+        errorMessage.includes('Unauthorized')
+      ) {
+        // User not authenticated, set count to 0
+        setCount(0);
+      }
+      // Other unexpected errors - log but don't throw
+      else {
+        // Only log unexpected errors that we haven't handled
+        console.warn('Failed to fetch notification count:', errorMessage);
+        setCount(0);
       }
     } finally {
       setLoading(false);
