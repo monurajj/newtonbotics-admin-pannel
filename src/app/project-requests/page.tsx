@@ -20,6 +20,7 @@ import {
   UsersIcon,
   ArrowPathIcon
 } from '@heroicons/react/24/outline';
+import { getProjectRequestPermissions, canChangeStatus } from '@/lib/projectRequestPermissions';
 
 interface TeamMember {
   userId: string;
@@ -90,6 +91,7 @@ export default function ProjectRequestsPage() {
   const [projectRequests, setProjectRequests] = useState<ProjectRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id?: string; _id?: string; role?: string } | null>(null);
   const [filters, setFilters] = useState<ProjectRequestFilters>({
     search: '',
     status: '',
@@ -114,6 +116,19 @@ export default function ProjectRequestsPage() {
     deleted: 0
   });
   const [selectedRequests, setSelectedRequests] = useState<string[]>([]);
+
+  // Get current user
+  useEffect(() => {
+    const userData = localStorage.getItem('user');
+    if (userData) {
+      try {
+        const user = JSON.parse(userData);
+        setCurrentUser(user);
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+      }
+    }
+  }, []);
 
   const fetchDeletedCount = async () => {
     try {
@@ -323,6 +338,12 @@ export default function ProjectRequestsPage() {
 
   const handleUpdateStatus = async (requestId: string, status: string, reviewNotes?: string) => {
     try {
+      const request = projectRequests.find(r => r._id === requestId);
+      if (request && !canChangeStatus(request, currentUser)) {
+        alert('You do not have permission to change the status of this project request. Only administrators can modify approved projects.');
+        return;
+      }
+
       const token = localStorage.getItem('accessToken');
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://newton-botics-server-phi.vercel.app';
       console.log('Updating status to:', status, 'for request:', requestId);
@@ -348,7 +369,17 @@ export default function ProjectRequestsPage() {
         alert(`Status updated to ${status} successfully`);
       } else {
         console.error('Status update failed:', data);
-        alert(data.message || 'Failed to update status');
+        // Check for access denied error
+        if (response.status === 403) {
+          const message = data.message || 'Access denied';
+          if (message.includes('approved project requests') || message.includes('change status of approved')) {
+            alert('Cannot change status of approved project requests. Only administrators can modify the status of approved projects.');
+          } else {
+            alert(message);
+          }
+        } else {
+          alert(data.message || 'Failed to update status');
+        }
       }
     } catch (err) {
       console.error('Error updating status:', err);
@@ -882,71 +913,96 @@ export default function ProjectRequestsPage() {
                           <EyeIcon className="w-5 h-5" />
                         </a>
                         
-                        {!request.isDeleted && (
-                          <>
-                            {/* Admin Actions - Available for all statuses */}
-                            {request.status !== 'approved' && (
-                              <button 
-                                onClick={() => handleApproveRequest(request._id)}
-                                className="text-green-600 hover:text-green-900"
-                                title="Approve"
-                              >
-                                <CheckCircleIcon className="w-5 h-5" />
-                              </button>
-                            )}
-                            
-                            {request.status !== 'rejected' && (
-                              <button 
-                                onClick={() => {
-                                  const reason = prompt('Reason for rejection:');
-                                  if (reason) handleRejectRequest(request._id, reason);
-                                }}
-                                className="text-red-600 hover:text-red-900"
-                                title="Reject"
-                              >
-                                <XCircleIcon className="w-5 h-5" />
-                              </button>
-                            )}
-                            
-                            {request.status !== 'under_review' && (
-                              <button 
-                                onClick={() => handleUpdateStatus(request._id, 'under_review')}
-                                className="text-blue-600 hover:text-blue-900"
-                                title="Put Under Review"
-                              >
-                                <ExclamationTriangleIcon className="w-5 h-5" />
-                              </button>
-                            )}
-                            
-                            {request.status !== 'on_hold' && (
-                              <button 
-                                onClick={() => handleUpdateStatus(request._id, 'on_hold')}
-                                className="text-gray-600 hover:text-gray-900"
-                                title="Put On Hold"
-                              >
-                                <Cog6ToothIcon className="w-5 h-5" />
-                              </button>
-                            )}
-                            
-                            {request.status !== 'pending' && (
-                              <button 
-                                onClick={() => handleUpdateStatus(request._id, 'pending')}
-                                className="text-yellow-600 hover:text-yellow-900"
-                                title="Reset to Pending"
-                              >
-                                <ClockIcon className="w-5 h-5" />
-                              </button>
-                            )}
-                            
-                            <button 
-                              onClick={() => handleDeleteProjectRequest(request._id)}
-                              className="text-red-800 hover:text-red-900"
-                              title="Delete"
-                            >
-                              <TrashIcon className="w-5 h-5" />
-                            </button>
-                          </>
-                        )}
+                        {!request.isDeleted && (() => {
+                          const permissions = getProjectRequestPermissions(request, currentUser);
+                          
+                          return (
+                            <>
+                              {/* Approve Button - Only show if user can change status and not already approved */}
+                              {permissions.canChangeStatus && request.status !== 'approved' && (
+                                <button 
+                                  onClick={() => handleApproveRequest(request._id)}
+                                  className="text-green-600 hover:text-green-900"
+                                  title="Approve"
+                                >
+                                  <CheckCircleIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                              
+                              {/* Reject Button - Only show if user can change status and not already rejected */}
+                              {permissions.canChangeStatus && request.status !== 'rejected' && (
+                                <button 
+                                  onClick={() => {
+                                    const reason = prompt('Reason for rejection:');
+                                    if (reason) handleRejectRequest(request._id, reason);
+                                  }}
+                                  className="text-red-600 hover:text-red-900"
+                                  title="Reject"
+                                >
+                                  <XCircleIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                              
+                              {/* Status Change Buttons - Only show if user can change status */}
+                              {permissions.canChangeStatus && request.status !== 'under_review' && (
+                                <button 
+                                  onClick={() => handleUpdateStatus(request._id, 'under_review')}
+                                  className="text-blue-600 hover:text-blue-900"
+                                  title="Put Under Review"
+                                >
+                                  <ExclamationTriangleIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                              
+                              {permissions.canChangeStatus && request.status !== 'on_hold' && (
+                                <button 
+                                  onClick={() => handleUpdateStatus(request._id, 'on_hold')}
+                                  className="text-gray-600 hover:text-gray-900"
+                                  title="Put On Hold"
+                                >
+                                  <Cog6ToothIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                              
+                              {permissions.canChangeStatus && request.status !== 'pending' && (
+                                <button 
+                                  onClick={() => handleUpdateStatus(request._id, 'pending')}
+                                  className="text-yellow-600 hover:text-yellow-900"
+                                  title="Reset to Pending"
+                                >
+                                  <ClockIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                              
+                              {/* Admin can always change status, including on approved projects */}
+                              {currentUser?.role === 'admin' && request.status === 'approved' && (
+                                <button 
+                                  onClick={() => {
+                                    const newStatus = prompt('Enter new status (pending, under_review, rejected, on_hold):');
+                                    if (newStatus && ['pending', 'under_review', 'rejected', 'on_hold'].includes(newStatus)) {
+                                      handleUpdateStatus(request._id, newStatus);
+                                    }
+                                  }}
+                                  className="text-indigo-600 hover:text-indigo-900"
+                                  title="Change Status (Admin Only)"
+                                >
+                                  <Cog6ToothIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                              
+                              {/* Delete Button - Only show if user has permission */}
+                              {permissions.canDelete && (
+                                <button 
+                                  onClick={() => handleDeleteProjectRequest(request._id)}
+                                  className="text-red-800 hover:text-red-900"
+                                  title="Delete"
+                                >
+                                  <TrashIcon className="w-5 h-5" />
+                                </button>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>
