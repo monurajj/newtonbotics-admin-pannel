@@ -61,7 +61,11 @@ export class NotificationService {
         || topLevelMessage
         || `HTTP error! status: ${response.status}`;
       
-      throw new Error(errorMessage);
+      // Create error with status code information for better handling
+      const error = new Error(errorMessage);
+      (error as any).statusCode = response.status;
+      (error as any).status = response.status;
+      throw error;
     }
 
     return response.json();

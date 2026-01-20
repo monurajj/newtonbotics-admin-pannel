@@ -15,8 +15,10 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   XCircleIcon,
-  DocumentTextIcon
+  DocumentTextIcon,
+  DocumentArrowDownIcon
 } from '@heroicons/react/24/outline';
+import { getProjectRequestPermissions, canChangeStatus } from '@/lib/projectRequestPermissions';
 
 interface TeamMember {
   userId: string;
@@ -56,6 +58,14 @@ interface ProjectRequest {
   resources: Resource[];
   createdAt: string;
   updatedAt: string;
+  document?: {
+    originalName?: string;
+    documentName?: string;
+    url?: string;
+    publicId?: string;
+    size?: number;
+    bytes?: number;
+  };
 }
 
 export default function ProjectRequestDetailsPage() {
@@ -65,6 +75,20 @@ export default function ProjectRequestDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'audit'>('details');
+  const [currentUser, setCurrentUser] = useState<{ id?: string; _id?: string; role?: string } | null>(null);
+
+  // Get current user
+  useEffect(() => {
+    const userData = localStorage.getItem('user');
+    if (userData) {
+      try {
+        const user = JSON.parse(userData);
+        setCurrentUser(user);
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (params.id) {
@@ -198,6 +222,11 @@ export default function ProjectRequestDetailsPage() {
 
   const handleUpdateStatus = async (status: string) => {
     try {
+      if (!canChangeStatus(projectRequest, currentUser)) {
+        alert('You do not have permission to change the status of this project request. Only administrators can modify approved projects.');
+        return;
+      }
+
       const token = localStorage.getItem('accessToken');
       console.log('Updating status to:', status);
       
@@ -219,11 +248,97 @@ export default function ProjectRequestDetailsPage() {
         alert(`Status updated to ${status} successfully`);
       } else {
         console.error('Status update failed:', data);
+        // Check for access denied error
+        if (response.status === 403) {
+          const message = data.message || 'Access denied';
+          if (message.includes('approved project requests') || message.includes('change status of approved')) {
+            alert('Cannot change status of approved project requests. Only administrators can modify the status of approved projects.');
+          } else {
+            alert(message);
+          }
+        } else {
         alert(data.message || 'Failed to update status');
+        }
       }
     } catch (err) {
       console.error('Error updating status:', err);
       alert('Failed to update status');
+    }
+  };
+
+  const handleViewDocument = async () => {
+    if (!projectRequest?.document) {
+      alert('No document available for this project request');
+      return;
+    }
+
+    try {
+      const permissions = getProjectRequestPermissions(projectRequest, currentUser);
+      if (!permissions.canViewDocument) {
+        alert('Access denied. You do not have permission to view this document.');
+        return;
+      }
+
+      const token = localStorage.getItem('accessToken');
+      
+      // Use frontend API route which proxies to backend
+      const response = await fetch(`/api/project-requests/${params.id}/document`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('Access denied. You do not have permission to view this document.');
+        }
+        if (response.status === 404) {
+          throw new Error('Document not found for this project request.');
+        }
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to download document.');
+      }
+
+      // Check if it's a redirect response (Cloudinary URL)
+      // The API route will handle redirects, but we can also check response type
+      if (response.type === 'opaqueredirect' || response.url.includes('cloudinary.com') || response.url.includes('res.cloudinary.com')) {
+        // For Cloudinary URLs, open in new tab
+        const location = response.headers.get('location') || response.url;
+        if (location) {
+          window.open(location, '_blank');
+          return;
+        }
+      }
+
+      // Handle file download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      // Get filename from Content-Disposition header or use from project request
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = 'document.pdf';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      } else if (projectRequest.document?.originalName || projectRequest.document?.documentName) {
+        filename = projectRequest.document.originalName || projectRequest.document.documentName || 'document.pdf';
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      alert('Document downloaded successfully');
+    } catch (err: any) {
+      console.error('Error viewing document:', err);
+      alert(err.message || 'Failed to download document');
     }
   };
 
@@ -289,6 +404,8 @@ export default function ProjectRequestDetailsPage() {
     );
   }
 
+  const permissions = getProjectRequestPermissions(projectRequest, currentUser);
+
   return (
     <AdminLayout pageTitle="Project Request Details">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -311,8 +428,12 @@ export default function ProjectRequestDetailsPage() {
               {getStatusIcon(projectRequest.status)}
               <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(projectRequest.status)}`}>
                 {projectRequest.status ? projectRequest.status.replace('_', ' ').toUpperCase() : 'LOADING'}
+                {permissions.showAdminBadge && (
+                  <span className="ml-2 text-xs">(Admin-Only Editing)</span>
+                )}
               </span>
             </div>
+            {permissions.canDelete && (
             <button
               onClick={handleDeleteProjectRequest}
               className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 flex items-center space-x-2"
@@ -320,8 +441,24 @@ export default function ProjectRequestDetailsPage() {
               <TrashIcon className="w-5 h-5" />
               <span>Delete</span>
             </button>
+            )}
           </div>
         </div>
+
+        {/* Read-Only Warning */}
+        {permissions.isReadOnly && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <div className="flex items-start">
+              <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 mr-2 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-medium text-yellow-800">Read-Only Mode</h3>
+                <p className="text-sm text-yellow-700 mt-1">
+                  This project request is approved and can only be edited by administrators.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="bg-white rounded-lg shadow">
@@ -364,6 +501,25 @@ export default function ProjectRequestDetailsPage() {
                 <h3 className="text-lg font-medium text-gray-900">Request Overview</h3>
               </div>
               <div className="px-6 py-4 space-y-4">
+                {/* Document Section */}
+                {projectRequest.document && permissions.canViewDocument && (
+                  <div className="mb-4 pb-4 border-b border-gray-200">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Document</h4>
+                    <button
+                      onClick={handleViewDocument}
+                      className="inline-flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+                    >
+                      <DocumentArrowDownIcon className="w-5 h-5" />
+                      <span>View Document: {projectRequest.document.originalName || projectRequest.document.documentName || 'Document'}</span>
+                      {(projectRequest.document.size || projectRequest.document.bytes) && (
+                        <span className="text-sm opacity-90">
+                          ({(projectRequest.document.size || projectRequest.document.bytes || 0) / 1024 / 1024} MB)
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                )}
+
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-2">Description</h4>
                   <p className="text-gray-900 whitespace-pre-wrap">{projectRequest.description || 'No description provided'}</p>
@@ -653,13 +809,20 @@ export default function ProjectRequestDetailsPage() {
             </div>
 
             {/* Actions */}
+            {permissions.canChangeStatus && (
             <div className="bg-white shadow rounded-lg">
               <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">Admin Actions</h3>
-                <p className="text-sm text-gray-500 mt-1">Change status at any time</p>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    {currentUser?.role === 'admin' ? 'Admin Actions' : 'Status Management'}
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {currentUser?.role === 'admin' 
+                      ? 'Change status at any time (including approved projects)'
+                      : 'Change status for non-approved projects'}
+                  </p>
               </div>
               <div className="px-6 py-4 space-y-3">
-                {/* Approve Button - Available for all statuses except approved */}
+                  {/* Approve Button - Only show if user can change status and not already approved */}
                 {projectRequest.status !== 'approved' && (
                   <button 
                     onClick={handleApproveRequest}
@@ -670,7 +833,7 @@ export default function ProjectRequestDetailsPage() {
                   </button>
                 )}
                 
-                {/* Reject Button - Available for all statuses except rejected */}
+                  {/* Reject Button - Only show if user can change status and not already rejected */}
                 {projectRequest.status !== 'rejected' && (
                   <button 
                     onClick={handleRejectRequest}
@@ -681,7 +844,7 @@ export default function ProjectRequestDetailsPage() {
                   </button>
                 )}
                 
-                {/* Under Review Button - Available for all statuses except under_review */}
+                  {/* Under Review Button - Only show if user can change status and not already under_review */}
                 {projectRequest.status !== 'under_review' && (
                   <button 
                     onClick={() => handleUpdateStatus('under_review')}
@@ -692,7 +855,7 @@ export default function ProjectRequestDetailsPage() {
                   </button>
                 )}
                 
-                {/* On Hold Button - Available for all statuses except on_hold */}
+                  {/* On Hold Button - Only show if user can change status and not already on_hold */}
                 {projectRequest.status !== 'on_hold' && (
                   <button 
                     onClick={() => handleUpdateStatus('on_hold')}
@@ -703,7 +866,7 @@ export default function ProjectRequestDetailsPage() {
                   </button>
                 )}
                 
-                {/* Back to Pending Button - Available for all statuses except pending */}
+                  {/* Back to Pending Button - Only show if user can change status and not already pending */}
                 {projectRequest.status !== 'pending' && (
                   <button 
                     onClick={() => handleUpdateStatus('pending')}
@@ -713,6 +876,29 @@ export default function ProjectRequestDetailsPage() {
                     <span>Reset to Pending</span>
                   </button>
                 )}
+                  
+                  {/* Admin: Allow changing status on approved projects */}
+                  {currentUser?.role === 'admin' && projectRequest.status === 'approved' && (
+                    <div className="mt-4 p-3 bg-indigo-50 rounded-md border border-indigo-200">
+                      <p className="text-sm font-medium text-indigo-800 mb-2">Admin Status Change</p>
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value && e.target.value !== 'approved') {
+                            handleUpdateStatus(e.target.value);
+                            e.target.value = 'approved'; // Reset to current status
+                          }
+                        }}
+                        className="w-full border border-indigo-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        defaultValue="approved"
+                      >
+                        <option value="approved">Approved (Current)</option>
+                        <option value="pending">Pending</option>
+                        <option value="under_review">Under Review</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="on_hold">On Hold</option>
+                      </select>
+                    </div>
+                  )}
                 
                 {/* Current Status Indicator */}
                 <div className="mt-4 p-3 bg-gray-50 rounded-md">
@@ -725,6 +911,7 @@ export default function ProjectRequestDetailsPage() {
                 </div>
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>
