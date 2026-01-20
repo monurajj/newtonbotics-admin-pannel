@@ -23,7 +23,8 @@ import EditUserModal from '../../../components/EditUserModal';
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 interface User {
-  id: string;
+  id?: string;
+  _id?: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -42,6 +43,7 @@ interface User {
     notifications: boolean;
     newsletter: boolean;
   };
+  subroles?: string[];
   lastLogin?: string;
   createdAt: string;
   updatedAt: string;
@@ -155,7 +157,13 @@ export default function UserDetailPage() {
       const token = localStorage.getItem('accessToken');
       if (!token) return;
 
-      const response = await fetch(`/api/users/${user.id}`, {
+      const userId = user.id || user._id;
+      if (!userId) {
+        alert('User ID not found');
+        return;
+      }
+
+      const response = await fetch(`/api/users/${userId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -185,7 +193,13 @@ export default function UserDetailPage() {
       const token = localStorage.getItem('accessToken');
       if (!token) return;
 
-      const response = await fetch(`/api/users/${user.id}/reactivate`, {
+      const userId = user.id || user._id;
+      if (!userId) {
+        alert('User ID not found');
+        return;
+      }
+
+      const response = await fetch(`/api/users/${userId}/reactivate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -12,7 +12,8 @@ import {
 } from '@heroicons/react/24/outline';
 
 interface User {
-  id: string;
+  id?: string;
+  _id?: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -25,6 +26,7 @@ interface User {
   emailVerified: boolean;
   lastLogin?: string;
   createdAt: string;
+  updatedAt?: string;
   profileImageUrl?: string;
   bio?: string;
   skills?: string[];
@@ -33,6 +35,7 @@ interface User {
     notifications: boolean;
     newsletter: boolean;
   };
+  subroles?: string[];
 }
 
 interface UserDetailModalProps {
