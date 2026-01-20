@@ -21,7 +21,8 @@ import EditUserModal from '../../components/EditUserModal';
 import AdminLayout from '../../components/AdminLayout';
 
 interface User {
-  id: string;
+  id?: string;
+  _id?: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -43,6 +44,7 @@ interface User {
     notifications: boolean;
     newsletter: boolean;
   };
+  subroles?: string[];
 }
 
 interface Pagination {
@@ -159,18 +161,24 @@ export default function Users() {
         const rawUsers = data.data?.users || data.data?.items || data.users || [];
         
         // Normalize user IDs to handle both id and _id fields
-        const normalizedUsers = rawUsers.map((user: Record<string, unknown>) => {
+        const normalizedUsers = rawUsers.map((user: any) => {
           const resolvedId = typeof user.id === 'string' && user.id
             ? user.id
-            : typeof (user as { _id?: string })._id === 'string' && (user as { _id?: string })._id
-              ? (user as { _id?: string })._id
+            : typeof user._id === 'string' && user._id
+              ? user._id
               : '';
+          
+          // Ensure we have a valid ID before including the user
+          if (!resolvedId) {
+            return null;
+          }
+          
           return {
             ...user,
-            id: resolvedId || undefined,
-            _id: (user as { _id?: string })._id || resolvedId || undefined,
+            id: resolvedId,
+            _id: user._id || resolvedId,
           } as User;
-        }).filter((user: User) => user.id); // Filter out users without valid IDs
+        }).filter((user: User | null): user is User => user !== null && !!user.id); // Filter out users without valid IDs
         
         if (normalizedUsers.length === 0) {
           hasMore = false;
@@ -333,7 +341,10 @@ export default function Users() {
 
   const handleViewUser = async (user: User) => {
     // Navigate to the user detail page
-    window.location.href = `/users/${user.id}`;
+    const userId = user.id || user._id;
+    if (userId) {
+      window.location.href = `/users/${userId}`;
+    }
   };
 
   const handleEditUser = (user: User) => {
@@ -355,10 +366,12 @@ export default function Users() {
 
   const handleSaveUser = (updatedUser: User) => {
     // Update the user in the list
+    const updatedUserId = updatedUser.id || updatedUser._id;
     setUsers(prevUsers => 
-      prevUsers.map(user => 
-        user.id === updatedUser.id ? updatedUser : user
-      )
+      prevUsers.map(user => {
+        const userId = user.id || user._id;
+        return userId && updatedUserId && userId === updatedUserId ? updatedUser : user;
+      })
     );
     // Refresh statistics
     fetchStatistics();
@@ -581,8 +594,10 @@ export default function Users() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {users.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50">
+                {users.map((user) => {
+                  const userId = user.id || user._id || '';
+                  return (
+                  <tr key={userId} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10">
@@ -661,14 +676,20 @@ export default function Users() {
                         {user.email !== 'monu2feb2004@gmail.com' && (
                           user.isActive ? (
                             <button
-                              onClick={() => handleDeactivateUser(user.id)}
+                              onClick={() => {
+                                const userId = user.id || user._id;
+                                if (userId) handleDeactivateUser(userId);
+                              }}
                               className="text-red-600 hover:text-red-900"
                             >
                               <TrashIcon className="w-4 h-4" />
                             </button>
                           ) : (
                             <button
-                              onClick={() => handleReactivateUser(user.id)}
+                              onClick={() => {
+                                const userId = user.id || user._id;
+                                if (userId) handleReactivateUser(userId);
+                              }}
                               className="text-green-600 hover:text-green-900"
                             >
                               <ArrowPathIcon className="w-4 h-4" />
@@ -678,7 +699,8 @@ export default function Users() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
